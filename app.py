@@ -387,15 +387,114 @@ def create_match(current_user):
             'status': 'ongoing'
         }
         
+        ai_first_move = None
+        
+        # 如果用户选择黑方，AI需要先走一步白棋
+        if user_color == 'black':
+            try:
+                if stockfish_engine:
+                    ai_move = stockfish_engine.get_best_move_sync(initial_board.fen())
+                    if ai_move:
+                        move_obj = chess.Move.from_uci(ai_move)
+                        if move_obj in initial_board.legal_moves:
+                            # AI走第一步
+                            initial_board.push(move_obj)
+                            ai_first_move = ai_move
+                            
+                            # 记录AI的走法到数据库
+                            move_data = {
+                                'move_number': 1,
+                                'ply_number': 1,
+                                'color': 'white',
+                                'move_notation': ai_move,
+                                'fen_before': chess.Board().fen(),
+                                'fen_after': initial_board.fen()
+                            }
+                            db.add_move(game.game_id, move_data)
+                            
+                            # 更新游戏状态
+                            game_state['current_player'] = 'black'
+                            game_state['move_history'].append({
+                                'move': ai_move,
+                                'player': 'AI',
+                                'move_number': 1
+                            })
+                
+                if not ai_first_move:
+                    # 如果AI无法走棋，使用默认开局走法
+                    default_moves = ['e2e4', 'd2d4', 'g1f3', 'c2c4']
+                    for default_move in default_moves:
+                        try:
+                            move_obj = chess.Move.from_uci(default_move)
+                            if move_obj in initial_board.legal_moves:
+                                initial_board.push(move_obj)
+                                ai_first_move = default_move
+                                
+                                # 记录到数据库
+                                move_data = {
+                                    'move_number': 1,
+                                    'ply_number': 1,
+                                    'color': 'white',
+                                    'move_notation': default_move,
+                                    'fen_before': chess.Board().fen(),
+                                    'fen_after': initial_board.fen()
+                                }
+                                db.add_move(game.game_id, move_data)
+                                
+                                game_state['current_player'] = 'black'
+                                game_state['move_history'].append({
+                                    'move': default_move,
+                                    'player': 'AI',
+                                    'move_number': 1
+                                })
+                                break
+                        except:
+                            continue
+                            
+            except Exception as e:
+                print(f"AI走第一步时出错: {e}")
+                # 使用默认走法 e2e4
+                try:
+                    move_obj = chess.Move.from_uci('e2e4')
+                    initial_board.push(move_obj)
+                    ai_first_move = 'e2e4'
+                    
+                    move_data = {
+                        'move_number': 1,
+                        'ply_number': 1,
+                        'color': 'white',
+                        'move_notation': 'e2e4',
+                        'fen_before': chess.Board().fen(),
+                        'fen_after': initial_board.fen()
+                    }
+                    db.add_move(game.game_id, move_data)
+                    
+                    game_state['current_player'] = 'black'
+                    game_state['move_history'].append({
+                        'move': 'e2e4',
+                        'player': 'AI',
+                        'move_number': 1
+                    })
+                except:
+                    pass
+        
+        # 更新棋盘状态
+        game_state['board'] = initial_board
         active_games[game.game_id] = game_state
         
-        return jsonify({
+        response_data = {
             'gameId': str(game.game_id),
             'userColor': user_color,
-            'currentPlayer': 'white',
+            'currentPlayer': game_state['current_player'],
             'difficulty': difficulty,
             'initialBoard': initial_board.fen()
-        }), 201
+        }
+        
+        # 如果AI先走了，包含AI的走法信息
+        if ai_first_move:
+            response_data['aiFirstMove'] = ai_first_move
+        
+        return jsonify(response_data), 201
         
     except Exception as e:
         return jsonify({'error': {'code': 'INTERNAL_ERROR', 'message': str(e)}}), 500
@@ -838,19 +937,116 @@ def start_teaching_game(current_user):
             'created_at': utc_now().isoformat()
         }
         
+        # 如果用户选择黑方，AI需要先走一步白棋
+        ai_first_move = None
+        ai_first_analysis = None
+        
+        if user_color == 'black':
+            board = chess.Board()
+            
+            # AI走第一步白棋
+            try:
+                if stockfish_engine:
+                    ai_move = stockfish_engine.get_best_move_sync(board.fen())
+                    if ai_move:
+                        move_obj = chess.Move.from_uci(ai_move)
+                        if move_obj in board.legal_moves:
+                            board_before = board.fen()
+                            board.push(move_obj)
+                            ai_first_move = ai_move
+                            
+                            # 更新游戏状态
+                            teaching_game['board_state'] = board.fen()
+                            
+                            # 记录AI的第一步
+                            move_data = {
+                                'move_number': 1,
+                                'move': ai_move,
+                                'color': 'white',
+                                'board_before': board_before,
+                                'board_after': board.fen(),
+                                'is_ai_move': True,
+                                'timestamp': utc_now().isoformat()
+                            }
+                            teaching_game['moves'].append(move_data)
+                            
+                            # 为AI的第一步生成分析（可选）
+                            ai_first_analysis = f"AI选择了开局走法 {ai_move}，这是一个标准的开局原则。"
+                            
+                if not ai_first_move:
+                    # 如果AI无法走棋，使用默认开局走法
+                    default_moves = ['e2e4', 'd2d4', 'g1f3', 'c2c4']
+                    for default_move in default_moves:
+                        try:
+                            move_obj = chess.Move.from_uci(default_move)
+                            if move_obj in board.legal_moves:
+                                board_before = board.fen()
+                                board.push(move_obj)
+                                ai_first_move = default_move
+                                teaching_game['board_state'] = board.fen()
+                                
+                                move_data = {
+                                    'move_number': 1,
+                                    'move': default_move,
+                                    'color': 'white',
+                                    'board_before': board_before,
+                                    'board_after': board.fen(),
+                                    'is_ai_move': True,
+                                    'timestamp': utc_now().isoformat()
+                                }
+                                teaching_game['moves'].append(move_data)
+                                ai_first_analysis = f"AI选择了经典开局走法 {default_move}。"
+                                break
+                        except:
+                            continue
+                            
+            except Exception as e:
+                print(f"AI走第一步时出错: {e}")
+                # 使用默认走法 e2e4
+                try:
+                    move_obj = chess.Move.from_uci('e2e4')
+                    board_before = board.fen()
+                    board.push(move_obj)
+                    ai_first_move = 'e2e4'
+                    teaching_game['board_state'] = board.fen()
+                    
+                    move_data = {
+                        'move_number': 1,
+                        'move': 'e2e4',
+                        'color': 'white',
+                        'board_before': board_before,
+                        'board_after': board.fen(),
+                        'is_ai_move': True,
+                        'timestamp': utc_now().isoformat()
+                    }
+                    teaching_game['moves'].append(move_data)
+                    ai_first_analysis = "AI选择了经典的王兵开局 e2e4。"
+                except:
+                    pass
+        
         # 存储到session或数据库（这里简化用全局变量）
         if not hasattr(app, 'teaching_games'):
             app.teaching_games = {}
         app.teaching_games[teaching_game['id']] = teaching_game
         
-        return jsonify({
+        response_data = {
             'success': True,
             'gameId': teaching_game['id'],
             'boardState': teaching_game['board_state'],
             'userColor': user_color,
             'lessonType': lesson_type,
             'instructions': '欢迎进入教学模式！每走一步都会得到AI分析和指导。'
-        }), 201
+        }
+        
+        # 如果AI先走了，包含AI的走法信息
+        if ai_first_move:
+            response_data['aiFirstMove'] = ai_first_move
+            response_data['aiFirstAnalysis'] = ai_first_analysis
+            response_data['currentPlayer'] = 'black'  # 现在轮到用户（黑方）
+        else:
+            response_data['currentPlayer'] = 'white'  # 用户（白方）先走
+        
+        return jsonify(response_data), 201
         
     except Exception as e:
         return jsonify({'error': {'code': 'INTERNAL_ERROR', 'message': str(e)}}), 500
