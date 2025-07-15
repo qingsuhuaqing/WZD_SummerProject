@@ -49,7 +49,7 @@ class AnalysisService:
             stockfish_moves = []
             if cls.stockfish_engine:
                 try:
-                    stockfish_moves = await cls.stockfish_engine.get_best_moves(board_before, num_moves=3)
+                    stockfish_moves = cls.stockfish_engine.get_best_moves_sync(board_before, num_moves=3)
                 except Exception as e:
                     print(f"Stockfish分析错误: {e}")
                     stockfish_moves = []
@@ -241,7 +241,7 @@ class AnalysisService:
             for i, move in enumerate(moves):
                 if i % 5 == 0 or i == len(moves) - 1:  # 每5步分析一次
                     if cls.stockfish_engine:
-                        best_moves = await cls.stockfish_engine.get_best_moves(move.fen_before, num_moves=2)
+                        best_moves = cls.stockfish_engine.get_best_moves_sync(move.fen_before, num_moves=2)
                         key_positions.append({
                             "move_number": move.move_number,
                             "position": move.fen_before,
