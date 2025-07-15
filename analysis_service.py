@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 # 加载环境变量
 load_dotenv()
 
-# 设置OpenAI API配置
+# 进行设置OpenAI API配置
 openai.api_key = os.getenv('OPENAI_API_KEY')
 openai.api_base = os.getenv('OPENAI_API_BASE', 'https://api.openai.com/v1')
 
