@@ -5,7 +5,7 @@ import asyncio
 import jwt
 import os
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from dao import ChessDB
 from analysis_service import AnalysisService
@@ -73,6 +73,28 @@ def token_required(f):
     return decorated
 
 # 工具函数
+def utc_now():
+    """获取当前UTC时间（替代废弃的utc_now()）"""
+    return datetime.now(timezone.utc)
+
+def run_async_safe(coro):
+    """安全地运行异步函数，避免事件循环冲突"""
+    try:
+        # 尝试获取当前事件循环
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # 如果事件循环正在运行，创建一个新的线程来运行
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, coro)
+                return future.result()
+        else:
+            # 如果没有运行的事件循环，直接运行
+            return asyncio.run(coro)
+    except RuntimeError:
+        # 如果获取事件循环失败，创建新的
+        return asyncio.run(coro)
+
 def check_chess_library():
     """检查chess库是否可用"""
     if not CHESS_AVAILABLE:
@@ -83,7 +105,7 @@ def generate_token(username):
     """生成JWT token"""
     payload = {
         'username': username,
-        'exp': datetime.utcnow() + app.config['JWT_EXPIRATION_DELTA']
+        'exp': utc_now() + app.config['JWT_EXPIRATION_DELTA']
     }
     return jwt.encode(payload, app.config['SECRET_KEY'], algorithm='HS256')
 
@@ -122,7 +144,7 @@ def login():
             return jsonify({'error': {'code': 'UNAUTHORIZED', 'message': 'Invalid username or password'}}), 401
         
         # 更新最后登录时间
-        db.update_user(username, last_login=datetime.utcnow())
+        db.update_user(username, last_login=utc_now())
         
         token = generate_token(username)
         response = jsonify({
@@ -423,7 +445,7 @@ def get_game_state(current_user, game_id):
                 result = 'win' if game.result == 'player2_win' else 'loss'
         
         # 获取玩家评价
-        evaluation = asyncio.run(CompetitionService.summarize_player(current_user.username))
+        evaluation = run_async_safe(CompetitionService.summarize_player(current_user.username))
         
         return jsonify({
             'gameId': str(game_id),
@@ -511,7 +533,7 @@ def make_move(current_user, game_id):
         if board.is_checkmate():
             result = 'win'
             game_result = 'player1_win' if user_color == 'white' else 'player2_win'
-            db.update_game(game_id, result=game_result, end_time=datetime.utcnow())
+            db.update_game(game_id, result=game_result, end_time=utc_now())
             game_state['status'] = 'finished'
             
             return jsonify({
@@ -527,7 +549,7 @@ def make_move(current_user, game_id):
         
         elif board.is_stalemate() or board.is_insufficient_material():
             result = 'draw'
-            db.update_game(game_id, result='draw', end_time=datetime.utcnow())
+            db.update_game(game_id, result='draw', end_time=utc_now())
             game_state['status'] = 'finished'
             
             return jsonify({
@@ -555,7 +577,7 @@ def make_move(current_user, game_id):
             # AI无法走棋
             result = 'win'
             game_result = 'player1_win' if user_color == 'white' else 'player2_win'
-            db.update_game(game_id, result=game_result, end_time=datetime.utcnow())
+            db.update_game(game_id, result=game_result, end_time=utc_now())
             game_state['status'] = 'finished'
         else:
             # 执行AI走法
@@ -589,11 +611,11 @@ def make_move(current_user, game_id):
             if board.is_checkmate():
                 result = 'loss'
                 game_result = 'player2_win' if user_color == 'white' else 'player1_win'
-                db.update_game(game_id, result=game_result, end_time=datetime.utcnow())
+                db.update_game(game_id, result=game_result, end_time=utc_now())
                 game_state['status'] = 'finished'
             elif board.is_stalemate() or board.is_insufficient_material():
                 result = 'draw'
-                db.update_game(game_id, result='draw', end_time=datetime.utcnow())
+                db.update_game(game_id, result='draw', end_time=utc_now())
                 game_state['status'] = 'finished'
             else:
                 result = 'ongoing'
@@ -640,7 +662,7 @@ def resign_game(current_user, game_id):
         else:
             game_result = 'player1_win'
         
-        db.update_game(game_id, result=game_result, end_time=datetime.utcnow())
+        db.update_game(game_id, result=game_result, end_time=utc_now())
         
         # 更新游戏状态
         if game_id in active_games:
@@ -654,7 +676,7 @@ def resign_game(current_user, game_id):
         # 计算时长
         duration = 0
         if game.start_time:
-            duration = int((datetime.utcnow() - game.start_time).total_seconds())
+            duration = int((utc_now() - game.start_time).total_seconds())
         
         return jsonify({
             'result': 'loss',
@@ -806,14 +828,14 @@ def start_teaching_game(current_user):
         
         # 创建教学对局记录（这里简化处理，实际应存数据库）
         teaching_game = {
-            'id': f"teaching_{current_user.user_id}_{datetime.utcnow().timestamp()}",
+            'id': f"teaching_{current_user.user_id}_{utc_now().timestamp()}",
             'user_id': current_user.user_id,
             'lesson_type': lesson_type,
             'user_color': user_color,
             'board_state': chess.Board().fen(),
             'moves': [],
             'analysis_history': [],
-            'created_at': datetime.utcnow().isoformat()
+            'created_at': utc_now().isoformat()
         }
         
         # 存储到session或数据库（这里简化用全局变量）
@@ -877,7 +899,7 @@ def make_teaching_move(current_user, game_id):
             'move_count': move_number
         }
         
-        analysis_result = asyncio.run(AnalysisService.analyze_move(
+        analysis_result = run_async_safe(AnalysisService.analyze_move(
             user_move=user_move,
             board_before=board_before,
             board_after=board_after,
@@ -894,7 +916,7 @@ def make_teaching_move(current_user, game_id):
             'board_before': board_before,
             'board_after': board_after,
             'analysis': analysis_result,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': utc_now().isoformat()
         }
         
         teaching_game['moves'].append(move_data)
@@ -918,7 +940,7 @@ def make_teaching_move(current_user, game_id):
                 ai_board_after = board.fen()
                 
                 # 分析AI走法（也在教学模式下进行分析）
-                ai_analysis = asyncio.run(AnalysisService.analyze_move(
+                ai_analysis = run_async_safe(AnalysisService.analyze_move(
                     user_move=ai_move,
                     board_before=board_after,
                     board_after=ai_board_after,
@@ -935,7 +957,7 @@ def make_teaching_move(current_user, game_id):
                     'board_before': board_after,
                     'board_after': ai_board_after,
                     'analysis': ai_analysis,
-                    'timestamp': datetime.utcnow().isoformat()
+                    'timestamp': utc_now().isoformat()
                 }
                 
                 teaching_game['moves'].append(ai_move_data)
@@ -1024,7 +1046,7 @@ def get_teaching_history(current_user, game_id):
             })
         
         # 获取教学评价
-        evaluation = asyncio.run(TeachingService.generate_lessons(current_user.username, 3))
+        evaluation = run_async_safe(TeachingService.generate_lessons(current_user.username, 3))
         
         return jsonify({
             'userMove': user_move,
@@ -1059,7 +1081,7 @@ def analyze_user_skills(current_user, username):
             # 这里可以添加管理员权限检查
             pass
         
-        skill_analysis = asyncio.run(TeachingService.analyze_user_skills(username))
+        skill_analysis = run_async_safe(TeachingService.analyze_user_skills(username))
         
         if "error" in skill_analysis:
             return jsonify({
@@ -1080,7 +1102,7 @@ def analyze_user_skills(current_user, username):
 def analyze_current_user_skills(current_user):
     """分析当前用户的技能掌握情况"""
     try:
-        skill_analysis = asyncio.run(TeachingService.analyze_user_skills(current_user.username))
+        skill_analysis = run_async_safe(TeachingService.analyze_user_skills(current_user.username))
         
         if "error" in skill_analysis:
             return jsonify({
@@ -1106,7 +1128,7 @@ def get_user_learning_plan(current_user, username):
             # 这里可以添加管理员权限检查
             pass
         
-        learning_plan = asyncio.run(TeachingService.get_personalized_learning_plan(username))
+        learning_plan = run_async_safe(TeachingService.get_personalized_learning_plan(username))
         
         if "error" in learning_plan:
             return jsonify({
@@ -1127,7 +1149,7 @@ def get_user_learning_plan(current_user, username):
 def get_current_user_learning_plan(current_user):
     """获取当前用户的个性化学习计划"""
     try:
-        learning_plan = asyncio.run(TeachingService.get_personalized_learning_plan(current_user.username))
+        learning_plan = run_async_safe(TeachingService.get_personalized_learning_plan(current_user.username))
         
         if "error" in learning_plan:
             return jsonify({
@@ -1160,7 +1182,7 @@ def generate_personalized_lessons(current_user):
         # 限制课程数量
         lessons_count = max(1, min(10, lessons_count))
         
-        lessons = asyncio.run(TeachingService.generate_lessons(target_username, lessons_count))
+        lessons = run_async_safe(TeachingService.generate_lessons(target_username, lessons_count))
         
         return jsonify({
             'success': True,
@@ -1258,7 +1280,7 @@ def get_replay_data(current_user, game_id):
             ai_analysis = f"AI分析暂时不可用: {str(e)}"
         
         # 获取玩家评价
-        evaluation = asyncio.run(CompetitionService.summarize_player(current_user.username))
+        evaluation = run_async_safe(CompetitionService.summarize_player(current_user.username))
         
         return jsonify({
             'gameId': str(game.game_id),
@@ -1361,6 +1383,17 @@ def index():
         }
     })
 
+@app.route('/api/ping', methods=['GET'])
+def ping():
+    """健康检查接口"""
+    return jsonify({
+        'status': 'ok',
+        'message': 'pong',
+        'timestamp': utc_now().isoformat(),
+        'server': 'Chess Game API Server',
+        'version': '1.0.0'
+    })
+
 @app.route('/api/users/ranking', methods=['GET'])
 @token_required
 def get_users_ranking(current_user):
@@ -1417,7 +1450,7 @@ def get_recent_games(current_user):
 def analyze_current_user(current_user):
     """分析当前用户的棋风和技术水平"""
     try:
-        analysis_result = asyncio.run(CompetitionService.analyze_player_style(current_user.username))
+        analysis_result = run_async_safe(CompetitionService.analyze_player_style(current_user.username))
         
         if analysis_result["success"]:
             return jsonify({
@@ -1444,7 +1477,7 @@ def analyze_user_by_name(current_user, username):
             # 这里可以添加管理员权限检查
             pass
         
-        analysis_result = asyncio.run(CompetitionService.analyze_player_style(username))
+        analysis_result = run_async_safe(CompetitionService.analyze_player_style(username))
         
         if analysis_result["success"]:
             return jsonify({
