@@ -32,7 +32,15 @@ class StockfishEngine:
 
     def ensure_engine_running_sync(self):
         """同步方式确保 Stockfish 引擎已启动（供主线程初始化用）"""
-        asyncio.run(self._ensure_engine_running())
+        print(f"self._engine:", self._engine)
+        if self._engine is None:
+            try:
+                # 使用同步方式创建简单引擎实例
+                self._engine = chess.engine.SimpleEngine.popen_uci(self.stockfish_path)
+                print(f"Stockfish 引擎已成功启动：{self.stockfish_path}")
+            except Exception as e:
+                print(f"启动 Stockfish 引擎失败: {e}")
+                raise
 
     async def get_best_moves(self, fen_string: str, num_moves: int = 3, time_limit: float = None) -> list[str]:
         """
@@ -84,6 +92,52 @@ class StockfishEngine:
             print(f"分析棋局时发生错误: {e}")
             return []
 
+    def get_best_moves_sync(self, fen_string: str, num_moves: int = 3, time_limit: float = None) -> list[str]:
+        """
+        同步方式获取当前棋局下的最优走法序列
+        
+        Args:
+            fen_string (str): 当前棋局的 FEN 字符串
+            num_moves (int): 希望获取的最优走法的数量，默认为 3 个
+            time_limit (float): 引擎思考的时间限制（秒）
+            
+        Returns:
+            list[str]: UCI格式的最优走法列表
+        """
+        try:
+            # 确保引擎已启动
+            if self._engine is None:
+                self.ensure_engine_running_sync()
+            
+            board = chess.Board(fen_string)
+            
+            if board.is_game_over():
+                print("棋局已结束，无法生成走法。")
+                return []
+            
+            # 设置思考时间
+            limit = chess.engine.Limit(time=time_limit if time_limit is not None else self.default_time_limit)
+            
+            # 使用 SimpleEngine 的 analyse 方法获取多个最佳走法
+            # 这是同步调用，无需 await
+            info = self._engine.analyse(board, limit, multipv=num_moves)
+            
+            moves = []
+            # info 是一个列表，每个元素包含一个走法的分析结果
+            for entry in info:
+                if "pv" in entry and entry["pv"]:
+                    moves.append(entry["pv"][0].uci())
+            
+            return moves
+                
+        except Exception as e:
+            print(f"同步获取最优走法失败: {e}")
+            return []
+                
+        except Exception as e:
+            print(f"同步获取最优走法失败: {e}")
+            return []
+
     def get_best_move_sync(self, fen_string: str, time_limit: float = None) -> str:
         """
         同步方式获取最佳走法（专为Flask等同步环境设计）
@@ -96,20 +150,22 @@ class StockfishEngine:
             str: UCI格式的最佳走法，如果无法获取则返回None
         """
         try:
-            # 使用简单的同步方式直接创建引擎
-            with chess.engine.SimpleEngine.popen_uci(self.stockfish_path) as engine:
-                board = chess.Board(fen_string)
-                
-                if board.is_game_over():
-                    print("棋局已结束，无法生成走法。")
-                    return None
-                
-                # 设置思考时间
-                limit = chess.engine.Limit(time=time_limit if time_limit is not None else self.default_time_limit)
-                
-                # 获取最佳走法
-                result = engine.play(board, limit)
-                return result.move.uci() if result.move else None
+            # 确保引擎已启动
+            if self._engine is None:
+                self.ensure_engine_running_sync()
+            
+            board = chess.Board(fen_string)
+            
+            if board.is_game_over():
+                print("棋局已结束，无法生成走法。")
+                return None
+            
+            # 设置思考时间
+            limit = chess.engine.Limit(time=time_limit if time_limit is not None else self.default_time_limit)
+            
+            # 获取最佳走法
+            result = self._engine.play(board, limit)
+            return result.move.uci() if result.move else None
                 
         except Exception as e:
             print(f"同步获取走法失败: {e}")
@@ -119,6 +175,14 @@ class StockfishEngine:
         """关闭 Stockfish 引擎。"""
         if self._engine:
             await self._engine.quit()
+            self._engine = None
+            self._transport = None
+            print("Stockfish 引擎已关闭。")
+    
+    def quit_engine_sync(self):
+        """同步方式关闭 Stockfish 引擎"""
+        if self._engine:
+            self._engine.quit()
             self._engine = None
             self._transport = None
             print("Stockfish 引擎已关闭。")
