@@ -56,7 +56,7 @@ def main():
         app.run(
             debug=True,
             host='0.0.0.0',
-            port=5000,
+            port=8000,
             use_reloader=False  # 避免重复初始化
         )
     except KeyboardInterrupt:
