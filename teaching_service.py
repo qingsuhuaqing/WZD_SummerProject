@@ -94,7 +94,7 @@ class TeachingService:
                 for i, move in enumerate(moves):
                     if i % 5 == 0 or i == len(moves) - 1:  # 每5步分析一次
                         if cls.stockfish_engine:
-                            best_moves = await cls.stockfish_engine.get_best_moves(move.fen_before, num_moves=2)
+                            best_moves = cls.stockfish_engine.get_best_moves_sync(move.fen_before, num_moves=2)
                             key_analysis.append({
                                 "move_number": move.move_number,
                                 "player_move": move.move_notation,
@@ -291,7 +291,7 @@ class TeachingService:
                     # 使用Stockfish评估该走法是否优秀
                     if cls.stockfish_engine:
                         try:
-                            best_moves = await cls.stockfish_engine.get_best_moves(move.fen_before, num_moves=3)
+                            best_moves = cls.stockfish_engine.get_best_moves_sync(move.fen_before, num_moves=3)
                             if move.move_notation in best_moves[:2]:  # 在前2个推荐走法中
                                 good_moves += 1
                         except:
@@ -318,7 +318,7 @@ class TeachingService:
             for move in endgame_moves:
                 if cls.stockfish_engine:
                     try:
-                        best_moves = await cls.stockfish_engine.get_best_moves(move.fen_before, num_moves=5)
+                        best_moves = cls.stockfish_engine.get_best_moves_sync(move.fen_before, num_moves=5)
                         if move.move_notation in best_moves[:3]:
                             accurate_moves += 1
                     except:
@@ -365,7 +365,7 @@ class TeachingService:
             
             for move in sample_moves:
                 try:
-                    best_moves = await cls.stockfish_engine.get_best_moves(move.fen_before, num_moves=5)
+                    best_moves = cls.stockfish_engine.get_best_moves_sync(move.fen_before, num_moves=5)
                     total_moves += 1
                     
                     if move.move_notation in best_moves[:3]:
