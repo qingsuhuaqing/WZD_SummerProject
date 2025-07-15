@@ -49,7 +49,7 @@ class CompetitionService:
                 moves = db.get_game_moves(latest_game.game_id)
                 key_moves = []
                 for move in moves:
-                    best_moves = await cls.stockfish_engine.get_best_moves(move.fen_before, num_moves=1)
+                    best_moves = cls.stockfish_engine.get_best_moves_sync(move.fen_before, num_moves=1)
                     key_moves.append({
                         "move_number": move.move_number,
                         "player_move": move.move_notation,
@@ -119,7 +119,7 @@ class CompetitionService:
             time_limit = time_limits.get(difficulty_level, 0.5)
         
         try:
-            best_moves = await cls.stockfish_engine.get_best_moves(
+            best_moves = cls.stockfish_engine.get_best_moves_sync(
                 fen_string, 
                 num_moves=1, 
                 time_limit=time_limit
@@ -492,7 +492,7 @@ class CompetitionService:
                     # 获取残局关键位置的Stockfish分析
                     try:
                         for move in endgame_moves[-3:]:  # 分析最后3步
-                            best_moves = await cls.stockfish_engine.get_best_moves(move.fen_before, num_moves=3)
+                            best_moves = cls.stockfish_engine.get_best_moves_sync(move.fen_before, num_moves=3)
                             if move.move_notation in best_moves[:1]:
                                 analysis_data["strong_moves"].append({
                                     "game_id": game.game_id,
